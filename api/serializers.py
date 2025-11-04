@@ -20,12 +20,19 @@ class PublicUserSerializer(serializers.ModelSerializer):
         fields = ['id', 'phone', 'first_name', 'last_name']
 
 
+class ProfileUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Profile
+        fields = ['first_name', 'last_name']
+
+
 class DialogSerializer(serializers.ModelSerializer):
     participant = serializers.SerializerMethodField()
+    last_message = serializers.SerializerMethodField()
 
     class Meta:
         model = Dialog
-        fields = ['id', 'participant', 'created_at']
+        fields = ['id', 'participant', 'created_at', 'last_message']
 
     def get_participant(self, obj):
         request = self.context.get('request')
@@ -34,9 +41,17 @@ class DialogSerializer(serializers.ModelSerializer):
         try:
             profile = Profile.objects.get(user=other_user)
         except Profile.DoesNotExist:
-            # Fallback minimal data if profile is missing
             return {'id': other_user.id, 'phone': '', 'first_name': '', 'last_name': ''}
         return PublicUserSerializer(profile).data
+
+    def get_last_message(self, obj):
+        last = obj.messages.order_by('-created_at').first()
+        if not last:
+            return None
+        return {
+            'ciphertext': last.ciphertext,
+            'created_at': last.created_at,
+        }
 
 
 class MessageSerializer(serializers.ModelSerializer):

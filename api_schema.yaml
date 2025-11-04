@@ -1,20 +1,32 @@
-openapi: 3.0.3
+openapi: 3.0.0
 info:
-  title: Messenger API Schema
+  title: Easyappz Messenger API
   version: 1.0.0
-  description: Endpoints used by the frontend. JWT via Authorization: Bearer <token>.
+  description: REST API for secure client-side encrypted messenger
 servers:
-  - url: /api
+  - url: /
 paths:
-  /auth/register:
+  /api/auth/register:
     post:
-      summary: Register a new user by phone
+      summary: Register by phone and password
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthRegisterRequest'
+              type: object
+              required: [phone, password]
+              properties:
+                phone:
+                  type: string
+                  maxLength: 32
+                password:
+                  type: string
+                  minLength: 6
+                first_name:
+                  type: string
+                last_name:
+                  type: string
       responses:
         '201':
           description: Registered
@@ -23,9 +35,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
         '400':
-          description: Phone already registered or invalid payload
-      security: []
-  /auth/login:
+          description: Bad request
+  /api/auth/login:
     post:
       summary: Login by phone and password
       requestBody:
@@ -33,17 +44,226 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AuthLoginRequest'
+              type: object
+              required: [phone, password]
+              properties:
+                phone:
+                  type: string
+                password:
+                  type: string
       responses:
         '200':
-          description: Authenticated
+          description: Logged in
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
         '400':
           description: Invalid credentials
-      security: []
+  /api/users/me:
+    get:
+      summary: Get current user profile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '404':
+          description: Profile not found
+    patch:
+      summary: Update current user names (first_name, last_name only)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                first_name:
+                  type: string
+                last_name:
+                  type: string
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '400':
+          description: Validation error
+  /api/users/search:
+    get:
+      summary: Search users by phone (icontains)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: phone
+          schema:
+            type: string
+          required: true
+          description: Phone substring to search
+      responses:
+        '200':
+          description: List of public users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicUser'
+        '400':
+          description: Missing phone param
+  /api/dialogs/:
+    get:
+      summary: List current user's dialogs
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Array of dialogs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Dialog'
+    post:
+      summary: Create or return dialog with specified user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: integer
+      responses:
+        '201':
+          description: Dialog created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dialog'
+        '200':
+          description: Dialog already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dialog'
+        '400':
+          description: Invalid request (e.g., self-dialog)
+        '404':
+          description: User not found
+  /api/dialogs/{id}/:
+    get:
+      summary: Get dialog by id (only for its participants)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Dialog object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dialog'
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+  /api/dialogs/{id}/messages:
+    get:
+      summary: List messages in dialog
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 50
+        - in: query
+          name: offset
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - in: query
+          name: after
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Return messages created strictly after this timestamp
+      responses:
+        '200':
+          description: Paginated list of messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagesListResponse'
+        '400':
+          description: Bad params
+        '403':
+          description: Forbidden
+        '404':
+          description: Dialog not found
+    post:
+      summary: Create message in dialog
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ciphertext]
+              properties:
+                ciphertext:
+                  type: string
+      responses:
+        '201':
+          description: Created message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '400':
+          description: Validation error
+        '403':
+          description: Forbidden
+        '404':
+          description: Dialog not found
 components:
   securitySchemes:
     bearerAuth:
@@ -62,7 +282,7 @@ components:
           type: string
         last_name:
           type: string
-      required: [id, phone, first_name, last_name]
+      required: [id, phone]
     PublicUser:
       type: object
       properties:
@@ -74,7 +294,7 @@ components:
           type: string
         last_name:
           type: string
-      required: [id, phone, first_name, last_name]
+      required: [id, phone]
     Dialog:
       type: object
       properties:
@@ -85,7 +305,20 @@ components:
         created_at:
           type: string
           format: date-time
+        last_message:
+          oneOf:
+            - $ref: '#/components/schemas/LastMessage'
+            - type: 'null'
       required: [id, participant, created_at]
+    LastMessage:
+      type: object
+      properties:
+        ciphertext:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [ciphertext, created_at]
     Message:
       type: object
       properties:
@@ -101,33 +334,17 @@ components:
           type: string
           format: date-time
       required: [id, dialog, sender, ciphertext, created_at]
-    AuthRegisterRequest:
+    MessagesListResponse:
       type: object
       properties:
-        phone:
-          type: string
-        password:
-          type: string
-        first_name:
-          type: string
-        last_name:
-          type: string
-      required: [phone, password]
-    AuthLoginRequest:
-      type: object
-      properties:
-        phone:
-          type: string
-        password:
-          type: string
-      required: [phone, password]
-    AuthResponse:
-      type: object
-      properties:
-        token:
-          type: string
-        user:
-          $ref: '#/components/schemas/Profile'
-      required: [token, user]
-security:
-  - bearerAuth: []
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [items, total, limit, offset]

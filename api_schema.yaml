@@ -1,0 +1,133 @@
+openapi: 3.0.3
+info:
+  title: Messenger API Schema
+  version: 1.0.0
+  description: Endpoints used by the frontend. JWT via Authorization: Bearer <token>.
+servers:
+  - url: /api
+paths:
+  /auth/register:
+    post:
+      summary: Register a new user by phone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthRegisterRequest'
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Phone already registered or invalid payload
+      security: []
+  /auth/login:
+    post:
+      summary: Login by phone and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthLoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Invalid credentials
+      security: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Profile:
+      type: object
+      properties:
+        id:
+          type: integer
+        phone:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+      required: [id, phone, first_name, last_name]
+    PublicUser:
+      type: object
+      properties:
+        id:
+          type: integer
+        phone:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+      required: [id, phone, first_name, last_name]
+    Dialog:
+      type: object
+      properties:
+        id:
+          type: integer
+        participant:
+          $ref: '#/components/schemas/PublicUser'
+        created_at:
+          type: string
+          format: date-time
+      required: [id, participant, created_at]
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+        dialog:
+          type: integer
+        sender:
+          type: integer
+        ciphertext:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [id, dialog, sender, ciphertext, created_at]
+    AuthRegisterRequest:
+      type: object
+      properties:
+        phone:
+          type: string
+        password:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+      required: [phone, password]
+    AuthLoginRequest:
+      type: object
+      properties:
+        phone:
+          type: string
+        password:
+          type: string
+      required: [phone, password]
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: '#/components/schemas/Profile'
+      required: [token, user]
+security:
+  - bearerAuth: []

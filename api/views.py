@@ -1,8 +1,13 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework import serializers
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
-from .serializers import MessageSerializer
+
+
+class HelloMessageSerializer(serializers.Serializer):
+    message = serializers.CharField()
+    timestamp = serializers.DateTimeField()
 
 
 class HelloView(APIView):
@@ -11,9 +16,8 @@ class HelloView(APIView):
     """
 
     @extend_schema(
-        responses={200: MessageSerializer}, description="Get a hello world message"
+        responses={200: HelloMessageSerializer}, description="Get a hello world message"
     )
     def get(self, request):
         data = {"message": "Hello!", "timestamp": timezone.now()}
-        serializer = MessageSerializer(data)
-        return Response(serializer.data)
+        return Response(data)

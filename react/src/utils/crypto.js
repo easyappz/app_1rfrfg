@@ -88,3 +88,32 @@ export async function decryptString(payloadBase64, key) {
     throw new Error('Decryption failed');
   }
 }
+
+// New: binary encryption/decryption (photos and any bytes)
+export async function encryptBytes(bytesUint8Array, key) {
+  const subtle = getSubtle();
+  const iv = new Uint8Array(12);
+  crypto.getRandomValues(iv);
+  const encrypted = await subtle.encrypt({ name: 'AES-GCM', iv }, key, bytesUint8Array);
+  const ctBytes = new Uint8Array(encrypted);
+  const payload = {
+    iv: bytesToBase64(iv),
+    ciphertext: bytesToBase64(ctBytes),
+  };
+  const json = JSON.stringify(payload);
+  return stringToBase64(json);
+}
+
+export async function decryptBytes(payloadBase64, key) {
+  try {
+    const subtle = getSubtle();
+    const json = base64ToString(payloadBase64);
+    const obj = JSON.parse(json);
+    const iv = base64ToBytes(obj.iv);
+    const ct = base64ToBytes(obj.ciphertext);
+    const decrypted = await subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+    return new Uint8Array(decrypted);
+  } catch (e) {
+    throw new Error('Decryption failed');
+  }
+}

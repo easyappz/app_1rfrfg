@@ -26,7 +26,9 @@ SECRET_KEY = "django-insecure-dev-key-nz48zqPY5ScRCVRz"
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get("DJANGO_DEBUG") == "1"
 
-CSRF_TRUSTED_ORIGINS = ["https://*.easyappz.ru/", "http://localhost:8080"]
+X_FRAME_OPTIONS = 'SAMEORIGIN'
+
+CSRF_TRUSTED_ORIGINS = ["https://*.easyappz.ru/", "http://localhost:8080", "https://easyappz.ru/"]
 
 # Allow all hosts in Docker (restrict with nginx/load balancer)
 ALLOWED_HOSTS = ["*"]

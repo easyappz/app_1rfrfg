@@ -1,15 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getDialog } from '../api/dialogs';
-import { listMessages, sendMessage } from '../api/messages';
-import { deriveKey, encryptString, decryptString } from '../utils/crypto';
+import { listMessages, sendMessage, IMAGE_MAX_BYTES } from '../api/messages';
+import { deriveKey, encryptString, decryptString, encryptBytes, decryptBytes } from '../utils/crypto';
 
 export default function ChatPage() {
   const { id } = useParams();
   const dialogId = String(id);
 
   const [dialog, setDialog] = useState(null);
-  const [messages, setMessages] = useState([]); // items with optional plaintext
+  const [messages, setMessages] = useState([]); // items with optional plaintext for text and renderUrl for images
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -20,6 +20,10 @@ export default function ChatPage() {
   const [cryptoKey, setCryptoKey] = useState(null);
 
   const lastCreatedAtRef = useRef(null);
+  const prevUrlsRef = useRef(new Set());
+
+  const fileInputRef = useRef(null);
+
   const storageKeyPass = `chat_key_${dialogId}`;
   const salt = `dialog:${dialogId}`;
 
@@ -50,19 +54,60 @@ export default function ChatPage() {
     }
   };
 
-  const decryptMessages = async (items, key) => {
-    if (!Array.isArray(items)) return [];
-    if (!key) {
-      return items.map((m) => ({ ...m, plaintext: null, notDecrypted: true }));
+  const revokeUrlSafe = (url) => {
+    try {
+      if (url) URL.revokeObjectURL(url);
+    } catch (_) {
+      // ignore
     }
+  };
+
+  const decryptMessages = async (items, key, prevMessages = []) => {
+    if (!Array.isArray(items)) return [];
+
+    const prevMap = {};
+    for (let i = 0; i < prevMessages.length; i += 1) {
+      const pm = prevMessages[i];
+      prevMap[pm.id] = pm;
+    }
+
+    if (!key) {
+      return items.map((m) => ({
+        ...m,
+        plaintext: null,
+        notDecrypted: true,
+      }));
+    }
+
     const out = [];
     for (let i = 0; i < items.length; i += 1) {
       const m = items[i];
+      const type = m.content_type || 'text';
       try {
-        const pt = await decryptString(m.ciphertext, key);
-        out.push({ ...m, plaintext: pt, notDecrypted: false });
+        if (type === 'image') {
+          const bytes = await decryptBytes(m.ciphertext, key);
+          const prev = prevMap[m.id];
+          let renderUrl = prev && prev.renderUrl && prev.ciphertext === m.ciphertext ? prev.renderUrl : null;
+          if (!renderUrl) {
+            if (prev && prev.renderUrl && prev.ciphertext !== m.ciphertext) {
+              revokeUrlSafe(prev.renderUrl);
+            }
+            const blob = new Blob([bytes], { type: m.media_mime || 'application/octet-stream' });
+            renderUrl = URL.createObjectURL(blob);
+          }
+          out.push({ ...m, renderUrl, notDecrypted: false });
+        } else {
+          const pt = await decryptString(m.ciphertext, key);
+          out.push({ ...m, plaintext: pt, notDecrypted: false });
+        }
       } catch (_) {
-        out.push({ ...m, plaintext: null, notDecrypted: true });
+        // cannot decrypt
+        const prev = prevMap[m.id];
+        // If ciphertext changed and we had an url, revoke it
+        if (prev && prev.renderUrl && prev.ciphertext !== m.ciphertext) {
+          revokeUrlSafe(prev.renderUrl);
+        }
+        out.push({ ...m, plaintext: null, renderUrl: undefined, notDecrypted: true });
       }
     }
     return out;
@@ -76,7 +121,7 @@ export default function ChatPage() {
       setDialog(dlg);
       const resp = await listMessages(dialogId, { limit: 50, offset: 0 });
       const key = cryptoKey || (await loadPassphraseIfAny());
-      const processed = await decryptMessages(resp?.items || [], key);
+      const processed = await decryptMessages(resp?.items || [], key, []);
       setMessages(processed);
       if (processed.length) {
         lastCreatedAtRef.current = processed[processed.length - 1].created_at;
@@ -98,7 +143,18 @@ export default function ChatPage() {
     // re-decrypt if key becomes available/changes
     (async () => {
       if (!messages.length) return;
-      const processed = await decryptMessages(messages.map((m) => ({ id: m.id, dialog: m.dialog, sender: m.sender, ciphertext: m.ciphertext, created_at: m.created_at })), cryptoKey);
+      const base = messages.map((m) => ({
+        id: m.id,
+        dialog: m.dialog,
+        sender: m.sender,
+        ciphertext: m.ciphertext,
+        created_at: m.created_at,
+        content_type: m.content_type,
+        media_mime: m.media_mime,
+        media_name: m.media_name,
+        media_size: m.media_size,
+      }));
+      const processed = await decryptMessages(base, cryptoKey, messages);
       setMessages(processed);
       if (processed.length) {
         lastCreatedAtRef.current = processed[processed.length - 1].created_at;
@@ -119,7 +175,7 @@ export default function ChatPage() {
         const resp = await listMessages(dialogId, after ? { after } : { limit: 50, offset: 0 });
         const items = Array.isArray(resp?.items) ? resp.items : [];
         if (items.length) {
-          const processed = await decryptMessages(items, cryptoKey);
+          const processed = await decryptMessages(items, cryptoKey, messages);
           setMessages((prev) => {
             const merged = [...prev, ...processed];
             if (merged.length) {
@@ -138,10 +194,38 @@ export default function ChatPage() {
       if (timer) clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dialogId, cryptoKey]);
+  }, [dialogId, cryptoKey, messages]);
+
+  // Revoke ObjectURLs that are no longer present in state (memory management)
+  useEffect(() => {
+    const currentUrls = new Set();
+    for (let i = 0; i < messages.length; i += 1) {
+      const m = messages[i];
+      const type = m.content_type || 'text';
+      if (type === 'image' && m.renderUrl) currentUrls.add(m.renderUrl);
+    }
+    const prev = prevUrlsRef.current;
+    prev.forEach((url) => {
+      if (!currentUrls.has(url)) revokeUrlSafe(url);
+    });
+    prevUrlsRef.current = currentUrls;
+    return () => {
+      // nothing here; global cleanup in unmount effect below
+    };
+  }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      // Cleanup on unmount
+      const prev = prevUrlsRef.current;
+      prev.forEach((url) => revokeUrlSafe(url));
+      prevUrlsRef.current = new Set();
+    };
+  }, []);
 
   const onSend = async () => {
     if (!text) return;
+    setError('');
     setSending(true);
     try {
       let key = cryptoKey;
@@ -154,7 +238,7 @@ export default function ChatPage() {
       }
       const payloadCiphertext = await encryptString(text, key);
       const created = await sendMessage(dialogId, { ciphertext: payloadCiphertext });
-      const processed = await decryptMessages([created], key);
+      const processed = await decryptMessages([created], key, messages);
       setMessages((prev) => [...prev, ...processed]);
       setText('');
       setLastSeenNow();
@@ -163,6 +247,68 @@ export default function ChatPage() {
       }
     } catch (e) {
       setError('Не удалось отправить сообщение');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const onPickImage = () => {
+    if (fileInputRef.current) fileInputRef.current.click();
+  };
+
+  const readFileAsArrayBuffer = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('read_failed'));
+      reader.readAsArrayBuffer(file);
+    });
+  };
+
+  const onFileSelected = async (e) => {
+    const file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+    // Reset input so selecting the same file again triggers change
+    if (e.target) {
+      try { e.target.value = ''; } catch (_) { /* ignore */ }
+    }
+    if (!file) return;
+
+    if (file.size > IMAGE_MAX_BYTES) {
+      setError(`Файл слишком большой. Максимум ${(IMAGE_MAX_BYTES / (1024 * 1024)).toFixed(0)} МБ.`);
+      return;
+    }
+
+    setError('');
+    setSending(true);
+    try {
+      let key = cryptoKey;
+      if (!key) {
+        key = await loadPassphraseIfAny();
+        if (!key) {
+          setSending(false);
+          return; // user must enter key first
+        }
+      }
+
+      const buf = await readFileAsArrayBuffer(file);
+      const bytes = new Uint8Array(buf);
+      const ciphertext = await encryptBytes(bytes, key);
+
+      const created = await sendMessage(dialogId, {
+        content_type: 'image',
+        ciphertext,
+        media_mime: file.type || 'application/octet-stream',
+        media_name: file.name || 'image',
+        media_size: file.size,
+      });
+
+      const processed = await decryptMessages([created], key, messages);
+      setMessages((prev) => [...prev, ...processed]);
+      if (processed.length) {
+        lastCreatedAtRef.current = processed[processed.length - 1].created_at;
+      }
+    } catch (e) {
+      setError('Не удалось отправить изображение');
     } finally {
       setSending(false);
     }
@@ -198,19 +344,48 @@ export default function ChatPage() {
           {!loading && messages.length === 0 && (
             <div data-easytag="id9-react/src/pages/ChatPage.jsx" className="text-muted">Пока нет сообщений</div>
           )}
-          {messages.map((m) => (
-            <div data-easytag="id10-react/src/pages/ChatPage.jsx" key={m.id} className={`max-w-[80%] w-max px-3 py-2 rounded-lg ${m.sender === dialog?.participant?.id ? 'bg-white/5' : 'bg-brand/20 ml-auto'}`}>
-              <div data-easytag="id11-react/src/pages/ChatPage.jsx" className="text-sm break-words">{m.plaintext !== null && m.plaintext !== undefined ? m.plaintext : 'Сообщение не расшифровано (неверный ключ)'}</div>
-              <div data-easytag="id12-react/src/pages/ChatPage.jsx" className="text-[10px] text-muted mt-1">{new Date(m.created_at).toLocaleTimeString()}</div>
-            </div>
-          ))}
+          {messages.map((m) => {
+            const isOther = m.sender === dialog?.participant?.id;
+            const type = m.content_type || 'text';
+            return (
+              <div data-easytag="id10-react/src/pages/ChatPage.jsx" key={m.id} className={`max-w-[80%] w-max px-3 py-2 rounded-lg ${isOther ? 'bg-white/5' : 'bg-brand/20 ml-auto'}`}>
+                {type === 'image' ? (
+                  m.renderUrl && !m.notDecrypted ? (
+                    <div data-easytag="id24-react/src/pages/ChatPage.jsx" className="max-w-[60vw] md:max-w-[60%]">
+                      <img
+                        data-easytag="id25-react/src/pages/ChatPage.jsx"
+                        src={m.renderUrl}
+                        alt={m.media_name || 'image'}
+                        className="rounded-lg max-h-[60vh] object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div data-easytag="id26-react/src/pages/ChatPage.jsx" className="text-sm break-words">Изображение не расшифровано (неверный ключ)</div>
+                  )
+                ) : (
+                  <div data-easytag="id11-react/src/pages/ChatPage.jsx" className="text-sm break-words">{m.plaintext !== null && m.plaintext !== undefined ? m.plaintext : 'Сообщение не расшифровано (неверный ключ)'}</div>
+                )}
+                <div data-easytag="id12-react/src/pages/ChatPage.jsx" className="text-[10px] text-muted mt-1">{new Date(m.created_at).toLocaleTimeString()}</div>
+              </div>
+            );
+          })}
         </div>
 
         <div data-easytag="id13-react/src/pages/ChatPage.jsx" className="p-3 border-t border-white/10 bg-card">
           <div data-easytag="id14-react/src/pages/ChatPage.jsx" className="flex items-center gap-2">
+            <button data-easytag="id27-react/src/pages/ChatPage.jsx" onClick={onPickImage} disabled={sending} className="px-3 py-2 rounded-md bg-white/10 hover:bg-white/15 disabled:opacity-60">Фото</button>
+            <input
+              data-easytag="id28-react/src/pages/ChatPage.jsx"
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={onFileSelected}
+            />
             <input data-easytag="id15-react/src/pages/ChatPage.jsx" value={text} onChange={(e) => setText(e.target.value)} placeholder="Введите сообщение" className="flex-1 bg-bg border border-white/10 rounded-md px-3 py-2 outline-none focus:border-brand" />
             <button data-easytag="id16-react/src/pages/ChatPage.jsx" onClick={onSend} disabled={sending || !text} className="px-4 py-2 rounded-md bg-brand hover:opacity-90 disabled:opacity-60">Отправить</button>
           </div>
+          <div data-easytag="id29-react/src/pages/ChatPage.jsx" className="text-[11px] text-muted mt-1">Макс. размер фото: {(IMAGE_MAX_BYTES / (1024 * 1024)).toFixed(0)} МБ</div>
         </div>
       </div>
 

@@ -247,10 +247,25 @@ paths:
           application/json:
             schema:
               type: object
+              description: |
+                Create encrypted message. Ciphertext is required for all messages. If content_type is 'image', you must also provide media_mime, media_name, and media_size (> 0).
               required: [ciphertext]
               properties:
                 ciphertext:
                   type: string
+                content_type:
+                  type: string
+                  enum: [text, image]
+                  default: text
+                media_mime:
+                  type: string
+                  description: Required when content_type is 'image'. Example: image/jpeg
+                media_name:
+                  type: string
+                  description: Required when content_type is 'image'. Example: photo.jpg
+                media_size:
+                  type: integer
+                  description: Required when content_type is 'image'. File size in bytes (> 0)
       responses:
         '201':
           description: Created message
@@ -318,7 +333,12 @@ components:
         created_at:
           type: string
           format: date-time
-      required: [ciphertext, created_at]
+        content_type:
+          type: string
+          enum: [text, image]
+        media_mime:
+          type: string
+      required: [ciphertext, created_at, content_type]
     Message:
       type: object
       properties:
@@ -330,10 +350,19 @@ components:
           type: integer
         ciphertext:
           type: string
+        content_type:
+          type: string
+          enum: [text, image]
+        media_mime:
+          type: string
+        media_name:
+          type: string
+        media_size:
+          type: integer
         created_at:
           type: string
           format: date-time
-      required: [id, dialog, sender, ciphertext, created_at]
+      required: [id, dialog, sender, ciphertext, content_type, created_at]
     MessagesListResponse:
       type: object
       properties:

@@ -66,5 +66,37 @@ class MessageListCreateView(APIView):
         if not isinstance(ciphertext, str) or not ciphertext:
             return Response({'detail': 'ciphertext is required and must be a non-empty string'}, status=status.HTTP_400_BAD_REQUEST)
 
-        message = Message.objects.create(dialog=dialog, sender=request.user, ciphertext=ciphertext)
+        content_type = request.data.get('content_type', 'text')
+        if content_type not in ('text', 'image'):
+            return Response({'detail': "content_type must be 'text' or 'image'"}, status=status.HTTP_400_BAD_REQUEST)
+
+        media_mime = ''
+        media_name = ''
+        media_size = None
+
+        if content_type == 'image':
+            media_mime = request.data.get('media_mime')
+            media_name = request.data.get('media_name')
+            media_size_raw = request.data.get('media_size')
+
+            if not isinstance(media_mime, str) or not media_mime.strip():
+                return Response({'detail': 'media_mime is required and must be a non-empty string for image messages'}, status=status.HTTP_400_BAD_REQUEST)
+            if not isinstance(media_name, str) or not media_name.strip():
+                return Response({'detail': 'media_name is required and must be a non-empty string for image messages'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                media_size = int(media_size_raw)
+            except (TypeError, ValueError):
+                return Response({'detail': 'media_size is required and must be a positive integer for image messages'}, status=status.HTTP_400_BAD_REQUEST)
+            if media_size <= 0:
+                return Response({'detail': 'media_size must be greater than 0 for image messages'}, status=status.HTTP_400_BAD_REQUEST)
+
+        message = Message.objects.create(
+            dialog=dialog,
+            sender=request.user,
+            ciphertext=ciphertext,
+            content_type=content_type,
+            media_mime=media_mime,
+            media_name=media_name,
+            media_size=media_size,
+        )
         return Response(MessageSerializer(message).data, status=status.HTTP_201_CREATED)

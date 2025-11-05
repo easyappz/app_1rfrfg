@@ -48,14 +48,22 @@ class DialogSerializer(serializers.ModelSerializer):
         last = obj.messages.order_by('-created_at').first()
         if not last:
             return None
-        return {
+        data = {
             'ciphertext': last.ciphertext,
             'created_at': last.created_at,
+            'content_type': getattr(last, 'content_type', 'text'),
         }
+        if getattr(last, 'media_mime', ''):
+            data['media_mime'] = last.media_mime
+        return data
 
 
 class MessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Message
-        fields = ['id', 'dialog', 'sender', 'ciphertext', 'created_at']
+        fields = [
+            'id', 'dialog', 'sender', 'ciphertext',
+            'content_type', 'media_mime', 'media_name', 'media_size',
+            'created_at'
+        ]
         read_only_fields = ['id', 'created_at']

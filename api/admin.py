@@ -25,7 +25,7 @@ class DialogAdmin(admin.ModelAdmin):
 
 @admin.register(Message)
 class MessageAdmin(admin.ModelAdmin):
-    list_display = ("id", "dialog", "sender", "created_at")
+    list_display = ("id", "dialog", "sender", "content_type", "media_mime", "media_name", "media_size", "created_at")
     list_select_related = ("dialog", "sender")
-    search_fields = ("ciphertext", "sender__username", "dialog__id")
-    list_filter = ("dialog", "sender")
+    search_fields = ("ciphertext", "media_name", "media_mime", "sender__username", "dialog__id")
+    list_filter = ("dialog", "sender", "content_type")

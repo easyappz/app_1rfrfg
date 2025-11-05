@@ -29,9 +29,20 @@ class Dialog(models.Model):
 
 
 class Message(models.Model):
+    CONTENT_TYPE_TEXT = "text"
+    CONTENT_TYPE_IMAGE = "image"
+    CONTENT_TYPE_CHOICES = (
+        (CONTENT_TYPE_TEXT, "Text"),
+        (CONTENT_TYPE_IMAGE, "Image"),
+    )
+
     dialog = models.ForeignKey(Dialog, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sent_messages")
     ciphertext = models.TextField()
+    content_type = models.CharField(max_length=16, choices=CONTENT_TYPE_CHOICES, default=CONTENT_TYPE_TEXT, db_index=True)
+    media_mime = models.CharField(max_length=150, blank=True, default="")
+    media_name = models.CharField(max_length=255, blank=True, default="")
+    media_size = models.IntegerField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
